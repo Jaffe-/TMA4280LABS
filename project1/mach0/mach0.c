@@ -3,27 +3,32 @@
 #include <math.h>
 #include "../unittest.h"
 
-double zeta0(int n)
+double comp_arctan(double x, int n)
 {
     double sum = 0;
 
-    for (int i = 1; i <= n; i++) {
-        sum += pow(i, -2);
+    for (int i = 0; i <= n; i++) {
+        sum += ((i % 2) ? (-1) : 1) * pow(x, 2 * i + 1) / (2 * i + 1);
     }
 
-    return sqrt(6 * sum);
+    return sum;
 }
 
-void unittests(void)
+double mach0(int n)
 {
-    TEST_CASE(within_range(zeta0(3), 2.857738, 0.0001));
+    return 16 * comp_arctan(1.0/5, n) - 4 * comp_arctan(1.0/239, n);
+}
+
+void unittests()
+{
+    TEST_CASE(within_range(mach0(3), 3.141592, 0.001));
 }
 
 void verification_test(void)
 {
     printf("Comparing to PI = %.17g\n\n", M_PI);
     for (int i = 1; i <= 24; i++) {
-        double error = fabs(M_PI - zeta0(pow(2, i)));
+        double error = fabs(M_PI - mach0(pow(2, i)));
         printf("n = %d: %.17g\n", (int)pow(2, i), error);
     }
 }
@@ -40,7 +45,7 @@ int main(int argc, char **argv)
 
     int n = atoi(argv[1]);
 
-    printf("%f\n", zeta0(n));
+    printf("%f\n", mach0(n));
 
     return 0;
 }
