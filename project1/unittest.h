@@ -19,8 +19,3 @@
 #else
 #define VERIFICATION_TEST(func) do { } while(0);
 #endif
-
-static inline bool within_range(double x, double y, double e)
-{
-    return abs(x - y) < e;
-}

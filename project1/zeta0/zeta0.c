@@ -16,7 +16,7 @@ double zeta0(int n)
 
 void unittests(void)
 {
-    TEST_CASE(within_range(zeta0(3), 2.857738, 0.0001));
+    TEST_CASE(fabs(zeta0(3) - 2.857738) < 0.0001);
 }
 
 void verification_test(void)

@@ -21,7 +21,7 @@ double mach0(int n)
 
 void unittests()
 {
-    TEST_CASE(within_range(mach0(3), 3.141592, 0.001));
+    TEST_CASE(fabs(mach0(3) - 3.141592) < 0.001);
 }
 
 void verification_test(void)
