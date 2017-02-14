@@ -1,23 +1,20 @@
 CSRC = $(wildcard $(m)*.c)
 HEADERS = $(wildcard $(m)*.h)
-OBJ = $(CSRC:.c=.o)
+COMP_LINE = gcc $(CSRC) $(CFLAGS) $(LDFLAGS) -o $@
 
 CFLAGS := -std=gnu11
 LDFLAGS = -lm
 
-mach0 : $(OBJ)
-	gcc $^ $(LDFLAGS) -o $@
+mach0 : $(CSRC) $(HEADERS) 
+	$(COMP_LINE)
 
-utest : CFLAGS += -DDO_UNITTEST
-utest : clean mach0
-	./mach0
+utest : clean
+	$(COMP_LINE) -DDO_UNITTEST
+	./utest
 
-vtest : CFLAGS += -DDO_VTEST
-vtest : clean mach0
-	./mach0 > verification_output.txt
-
-%.o : %.c
-	gcc $(CFLAGS) -c $< -o $@
+vtest : clean
+	$(COMP_LINE) -DDO_VTEST
+	./vtest > verification_output.txt
 
 clean:
 	rm -rf *.o
