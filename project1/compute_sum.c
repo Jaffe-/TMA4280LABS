@@ -37,7 +37,6 @@ void compute_sum(int n, int elements_per_term, double* (*generate_elements)(int)
     int n_remains = (n * elements_per_term) % size;
 
     double *vec = NULL;
-    double *partial_sum_vec = NULL;
     double *my_vec = malloc(sizeof(double) * n_vec);
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -56,18 +55,17 @@ void compute_sum(int n, int elements_per_term, double* (*generate_elements)(int)
     /* The root process also has to sum up the remaining elements */
     if (rank == 0) {
         partial_sum += sum(vec, n_remains);
-        partial_sum_vec = malloc(sizeof(double) * size);
     }
 
-    MPI_Gather(&partial_sum, 1, MPI_DOUBLE, partial_sum_vec, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    double final_sum;
+    MPI_Reduce(&partial_sum, &final_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
-        double result = finalize(sum(partial_sum_vec, size));
+        double result = finalize(final_sum);
         t_finished = MPI_Wtime();
         printf("Result: %f\nError: %.17g\nTime = %f\n", result, fabs(M_PI - result), t_finished - t_start);
 
         free(vec);
-        free(partial_sum_vec);
     }
 
     free(my_vec);
