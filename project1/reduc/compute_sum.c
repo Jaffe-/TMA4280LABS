@@ -58,9 +58,14 @@ void compute_sum(int n, int elements_per_term, double* (*generate_elements)(int)
         partial_sum += sum(vec, n_remains);
     }
 
-    double final_sum;
-
-    MPI_Allreduce(&partial_sum, &final_sum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    double final_sum = partial_sum;
+    for (int d = 0; d < log2(size); d++) {
+        double recv_sum;
+        int q = rank ^ (1 << d);
+        MPI_Send(&final_sum, 1, MPI_DOUBLE, q, 100, MPI_COMM_WORLD);
+        MPI_Recv(&recv_sum, 1, MPI_DOUBLE, q, 100, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        final_sum += recv_sum;
+    }
 
     double result = finalize(final_sum);
     t_finished = MPI_Wtime();
