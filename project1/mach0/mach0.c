@@ -7,7 +7,7 @@ double comp_arctan(double x, int n)
 {
     double sum = 0;
 
-    for (int i = 0; i <= n; i++) {
+    for (long int i = 0; i <= n; i++) {
         sum += ((i % 2) ? (-1) : 1) * pow(x, 2 * i + 1) / (2 * i + 1);
     }
 

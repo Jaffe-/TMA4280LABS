@@ -8,7 +8,8 @@
 
 double get_element(double x, int n)
 {
-    return ((n % 2) ? (-1) : 1) * pow(x, 2 * n + 1) / (2 * n + 1);
+    int n_wide = n;
+    return ((n % 2) ? (-1) : 1) * pow(x, 2 * n_wide + 1) / (2 * n_wide + 1);
 }
 
 double *generate_elements(int n)

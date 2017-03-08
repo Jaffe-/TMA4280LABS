@@ -63,7 +63,7 @@ void compute_sum(int n, int elements_per_term, double* (*generate_elements)(int)
     if (rank == 0) {
         double result = finalize(final_sum);
         t_finished = MPI_Wtime();
-        printf("Result: %f\nError: %.17g\nTime = %f\n", result, fabs(M_PI - result), t_finished - t_start);
+        printf("Result: %f\nError: %.17g\nTime: %f\n", result, fabs(M_PI - result), t_finished - t_start);
 
         free(vec);
     }
