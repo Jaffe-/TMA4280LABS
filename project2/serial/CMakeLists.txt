@@ -35,7 +35,7 @@ set(CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
 include_directories(${INCLUDES})
 
 # Add a library with common sources
-add_library(common fst.f)
+add_library(common ../fst.f)
 
 # The C based poisson application
 add_executable(poisson poisson.c)
