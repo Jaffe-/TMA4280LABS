@@ -1,128 +1,162 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <omp.h>
+
+
+/*
+  SubMatrix class
+
+  Represents a partition of the matrix. It imposes its
+  structure on a given data buffer.
+*/
+
+class SubMatrix {
+    int row_offset;
+    int col_offset;
+    int rows;
+    int cols;
+    int storage_dim;
+    double** data;
+
+public:
+    SubMatrix(int row_offset, int col_offset, int rows, int cols, int storage_dim, double* storage)
+        : row_offset(row_offset)
+        , col_offset(col_offset)
+        , rows(rows)
+        , cols(cols)
+        , storage_dim(storage_dim)
+    {
+        data = new double*[storage_dim];
+        data[0] = storage;
+        for (int i = 1; i < storage_dim; i++) {
+            data[i] = data[i-1] + storage_dim;
+        }
+    }
+
+    ~SubMatrix() {
+        delete data;
+    }
+
+    template <typename Op>
+    void map(Op op) {
+        #pragma omp parallel for schedule(static) collapse(2)
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                // Translate into corresponding indices in the matrix
+                const int i = row_offset + row;
+                const int j = col_offset + col;
+                data[row][col] = op(i, j, data[row][col]);
+            }
+        }
+    }
+
+    void transpose() {
+        #pragma omp parallel for schedule(dynamic)
+        for (int row = 0; row < storage_dim; row++) {
+            for (int col = 0; col < row; col++) {
+                std::swap(data[row][col], data[col][row]);
+            }
+        }
+    }
+
+    void copyRowToBuffer(int row, double* buffer) {
+        std::copy(data[row], data[row] + cols, &buffer[col_offset]);
+    }
+
+    void copyRowFromBuffer(int row, double* buffer) {
+        std::copy(&buffer[col_offset], &buffer[col_offset + cols], data[row]);
+    }
+};
+
 
 /*
   Slice class
 
-  Represents a set of consecutive rows in an array.
-  The slice is divided into a given number of bins which
-  simplifies doing the multi-process transpose operation.
+  Represents a collection of sub-matrices that make up a
+  collection of consecutive row in the matrix.
 */
 
 class Slice {
-    int m_n;
-    int m_bins;
-    int m_rows;
-    int m_offset;
-    int m_bin_dim;
-    double** m_data;
+    //    int m_n;
+    int subs;
+    int sub_dim;
+    int last_sub_dim;
+    SubMatrix** submatrices;
 
 public:
-    Slice() = delete;
+    double* data;
+    int offset;
+    int rows;
+
+    ~Slice() {
+        for (int i = 0; i < subs; i++) {
+            delete submatrices[i];
+        }
+        delete data;
+    }
+
+    Slice(const Slice&) = delete;
 
     Slice(int n, int slices, int index)
-        : m_n(n)
-        , m_bins(slices)
+        : subs(slices)
     {
-        const int rows = std::ceil((double)n / slices);
+        const int storage_dim = std::ceil((double)n / slices);
+        const int storage_size = std::pow(storage_dim, 2);
+        submatrices = new SubMatrix*[slices];
+        data = new double[storage_size * slices];
 
-        // All slices should have the same size except for the
-        // last one, which should fill up the rest of the rows.
+        offset = storage_dim * index;
+        sub_dim = storage_dim;
+        last_sub_dim = n - (slices - 1) * storage_dim;
         if (index < slices - 1) {
-            m_rows = rows;
+            rows = sub_dim;
         } else {
-            m_rows = n - (slices - 1) * rows;
+            rows = last_sub_dim;
         }
-        m_offset = rows * index;
-        m_data = new double*[slices];
-        m_bin_dim = rows;
 
-        // All slices (including the last one) should use the same
-        // memory layout for compatability between processes, so rows
-        // and not m_rows is used here
-        const int bin_size = std::pow(rows, 2);
-        m_data[0] = new double[bin_size * slices] {};
-        for (int i = 1; i < m_bins; i++) {
-            m_data[i] = m_data[i-1] + bin_size;
+        for (int i = 0; i < slices; i++) {
+            int cols = (i == slices - 1) ? last_sub_dim : storage_dim;
+            submatrices[i] = new SubMatrix(offset, i * storage_dim,
+                                           rows, cols,
+                                           storage_dim,
+                                           &data[i * storage_size]);
         }
     }
 
-    /*
-      Go through each bin and collect the sub arrays that make up the
-      requested row.
-    */
-    double* getRow(int row) {
-        // Only allocate once and reuse that buffer
-        static double* row_buffer = new double[m_bins * m_bin_dim];
-
-        for (int i = 0; i < m_bins; i++) {
-            const int columns = (i < m_bins - 1) ? m_bin_dim : m_rows;
-            std::copy(&m_data[i][row * m_bin_dim], &m_data[i][row * m_bin_dim + columns],
-                      &row_buffer[i * m_bin_dim]);
-        }
-
-        return row_buffer;
-    }
-
-    /*
-      Apply the function op to every row
-    */
-    template <typename Op>
-    void forEachRow(Op op) {
-        for (int i = 0; i < m_rows; i++) {
-            double* row = getRow(i);
-            op(row);
-        }
-    }
-
-    /*
-      Apply the function op to every element in the slice.
-      The internal data structure representation is translated to matrix
-      coordinates before calling the function.
-    */
     template <typename Op>
     void map(Op op) {
-        for (int bin = 0; bin < m_bins; bin++) {
-            const int columns = (bin < m_bins - 1) ? m_bin_dim : m_bin_dim - 1;
-            for (int row = 0; row < m_rows; row++) {
-                for (int col = 0; col < columns; col++) {
-                    const int bin_idx = row * m_bin_dim + col;
+        #pragma omp parallel for
+        for (int i = 0; i < subs; i++) {
+            submatrices[i]->map(op);
+        }
+    }
 
-                    // Translate into corresponding indices in the matrix
-                    const int i = m_offset + row;
-                    const int j = bin * m_bin_dim + col;
-                    m_data[bin][bin_idx] = op(i, j, m_data[bin][bin_idx]);
-                    // std::cout << "columns=" << columns
-                    //           << ", bin=" << bin
-                    //           << ", row=" << row
-                    //           << ", col=" << col
-                    //           << ", bin_idx=" << bin_idx
-                    //           << ", i=" << i
-                    //           << ", j=" << j
-                    //           << ", data=" << m_data[bin][bin_idx] << "\n";
-                }
+    template <typename Op>
+    void forEachRow(Op op) {
+        static double* buffer = new double[subs * sub_dim];
+
+        for (int row = 0; row < rows; row++) {
+            #pragma omp parallel for
+            for (int i = 0; i < subs; i++) {
+                submatrices[i]->copyRowToBuffer(row, buffer);
+            }
+
+            op(buffer);
+
+            #pragma omp parallel for
+            for (int i = 0; i < subs; i++) {
+                submatrices[i]->copyRowFromBuffer(row, buffer);
             }
         }
     }
 
-    /*
-      Return the raw bin array
-    */
-    double* getBins() {
-        return m_data[0];
-    }
-
-    /* Transpose each bin */
     void transpose() {
-        for (int bin = 0; bin < m_bins; bin++) {
-            for (int row = 0; row < m_bin_dim; row++) {
-                for (int col = 0; col < row; col++) {
-                    const int bin_idx = row * m_bin_dim + col;
-                    const int transposed_bin_idx = col * m_bin_dim + row;
-                    std::swap(m_data[bin][bin_idx], m_data[bin][transposed_bin_idx]);
-                }
-            }
+        #pragma omp parallel for
+        for (int i = 0; i < subs; i++) {
+            submatrices[i]->transpose();
         }
     }
+
 };
