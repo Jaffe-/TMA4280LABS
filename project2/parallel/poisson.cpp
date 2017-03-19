@@ -91,16 +91,16 @@ struct Poisson {
         B.forEachRow(fst);
 
         MPI_Alltoallv(B.data, counts, displacements, MPI_DOUBLE,
-                      BT.data, counts, displacements, MPI_DOUBLE,
+                      B.temp_data, counts, displacements, MPI_DOUBLE,
                       MPI_COMM_WORLD);
 
-        BT.transpose();
-        BT.forEachRow(fstinv);
-        BT.map(solve_x);
-        BT.forEachRow(fst);
+        B.transpose();
+        B.forEachRow(fstinv);
+        B.map(solve_x);
+        B.forEachRow(fst);
 
-        MPI_Alltoallv(BT.data, counts, displacements, MPI_DOUBLE,
-                      B.data, counts, displacements, MPI_DOUBLE,
+        MPI_Alltoallv(B.data, counts, displacements, MPI_DOUBLE,
+                      B.temp_data, counts, displacements, MPI_DOUBLE,
                       MPI_COMM_WORLD);
 
         B.transpose();
@@ -160,7 +160,6 @@ double test_u2(double x, double y) {
 
 void slicetest(int n, int rank, int size) {
     Slice B(n, size, rank);
-    Slice BT(n, size, rank);
 
     int* counts = new int[size];
     int* displacements = new int[size];
@@ -237,13 +236,13 @@ void slicetest(int n, int rank, int size) {
     B.map(check_negated);
 
     MPI_Alltoallv(B.data, counts, displacements, MPI_DOUBLE,
-                  BT.data, counts, displacements, MPI_DOUBLE,
+                  B.temp_data, counts, displacements, MPI_DOUBLE,
                   MPI_COMM_WORLD);
 
-    BT.transpose();
+    B.transpose();
 
     // Check that we read out the expected transposed elements
-    r = BT.offset;
+    r = B.offset;
     auto check_transposed = [&] (double* row) {
         for (int col = 0; col < n; col++) {
             assert(row[col] == f(col, r, 0));
@@ -251,7 +250,7 @@ void slicetest(int n, int rank, int size) {
         r++;
     };
 
-    BT.forEachRow(check_transposed);
+    B.forEachRow(check_transposed);
 
     // Check that the elements are negated, this time using
     // map
@@ -259,7 +258,7 @@ void slicetest(int n, int rank, int size) {
         assert(val == f(j, i, 0));
         return val;
     };
-    BT.map(checkNeg);
+    B.map(checkNeg);
 }
 
 int main(int argc, char** argv) {
