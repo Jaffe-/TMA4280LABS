@@ -24,6 +24,7 @@ typedef int bool;
 real *mk_1D_array(size_t n, bool zero);
 real **mk_2D_array(size_t n1, size_t n2, bool zero);
 void transpose(real **bt, real **b, size_t m);
+real sol(real x, real y);
 real rhs(real x, real y);
 void fst_(real *v, int *n, real *w, int *nn);
 void fstinv_(real *v, int *n, real *w, int *nn);
@@ -95,13 +96,20 @@ int main(int argc, char **argv)
     double u_max = 0.0;
     for (size_t i = 0; i < m; i++) {
         for (size_t j = 0; j < m; j++) {
-            u_max = u_max > b[i][j] ? u_max : b[i][j];
+            double difference = fabs(b[i][j] - sol(grid[i], grid[j]));
+            if (difference > u_max) {
+                u_max = difference;
+            }
         }
     }
 
     printf("u_max = %e\n", u_max);
 
     return 0;
+}
+
+real sol(real x, real y) {
+    return (x - x*x) * (y - y*y);
 }
 
 real rhs(real x, real y) {
