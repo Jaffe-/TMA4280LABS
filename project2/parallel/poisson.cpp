@@ -19,7 +19,6 @@ struct Poisson {
     double h;
     double* diag;
     double* grid;
-    int send_counts;
     Slice B;
 
     Poisson(int n, int rank, int num_procs)
@@ -30,7 +29,6 @@ struct Poisson {
           h(1.0 / n),
           B(m, num_procs, rank)
     {
-        send_counts = std::pow(n / num_procs, 2);
         diag = new double[m];
         grid = new double[n + 1];
 
@@ -59,12 +57,12 @@ struct Poisson {
             return val / (diag[i] + diag[j]);
         };
 
-        auto fst = [this] (double* vec) {
+        auto fst = [=] (int r, double* vec) {
             int nn = 4 * n;
             fst_(vec, &n, &vec[n], &nn);
         };
 
-        auto fstinv = [this] (double* vec) {
+        auto fstinv = [=] (int r, double* vec) {
             int nn = 4 * n;
             fstinv_(vec, &n, &vec[n], &nn);
         };
@@ -74,16 +72,16 @@ struct Poisson {
         B.map(apply_f);
         B.forEachRow(fst);
 
-        MPI_Alltoall(B.data, send_counts, MPI_DOUBLE,
-                     B.temp_data, send_counts, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Alltoall(B.data, B.sub_size, MPI_DOUBLE,
+                     B.temp_data, B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
 
         B.transpose();
         B.forEachRow(fstinv);
         B.map(solve_x);
         B.forEachRow(fst);
 
-        MPI_Alltoall(B.data, send_counts, MPI_DOUBLE,
-                     B.temp_data, send_counts, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Alltoall(B.data, B.sub_size, MPI_DOUBLE,
+                     B.temp_data, B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
 
         B.transpose();
         B.forEachRow(fstinv);
@@ -95,28 +93,13 @@ struct Poisson {
         auto computeError = [this, &largest] (int i, int j, double val) {
             const double difference = std::abs(val - u(grid[i], grid[j]));
             #pragma omp critical
-            if (difference > largest) {
+            {
+            if (difference > largest)
                 largest = difference;
             }
             return val;
         };
-
         B.map(computeError);
-
-        return largest;
-    }
-
-    double largest() {
-        double largest = 0;
-        auto computeLargest = [this, &largest] (int i, int j, double val) {
-            if (val > largest) {
-                #pragma omp critical
-                largest = val;
-            }
-            return val;
-        };
-
-        B.map(computeLargest);
 
         return largest;
     }
@@ -140,104 +123,6 @@ double test_u2(double x, double y) {
     return (x - x*x) * (y - y*y);
 }
 
-void slicetest(int n, int rank, int size) {
-    Slice B(n, size, rank);
-
-    int send_counts = std::pow(std::ceil((double)n / size), 2);
-
-    // For debugging the tests
-    auto printer = [&] (int i, int j, double val) {
-        std::cout << "i=" << i
-        << ", j=" << j
-        << ", val=" << val << "\n";
-        return val;
-    };
-
-    // Produce test values and check that i, j are inside bounds
-    auto f = [&n] (int i, int j, double) {
-        assert(i >= 0 && i < n && j >= 0 && j < n);
-        return n * i + j;
-    };
-
-    // Fill test values
-    B.map(f);
-
-    bool** seen = new bool*[n];
-    for (int i = 0; i < n; i++) {
-        seen[i] = new bool[n] {};
-    }
-    auto check_coverage = [seen, &n] (int i, int j, double val) {
-        #pragma omp critical
-        seen[i][j] += 1;
-        return val;
-    };
-    B.map(check_coverage);
-    bool covered = true;
-    bool unwanted = false;
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            // We are within the range
-            if (i >= B.offset && i < B.offset + B.rows) {
-                if (seen[i][j] != 1) {
-                    covered = false;
-                }
-            }
-            else {
-                if (seen[i][j] != 0)
-                    unwanted = true;
-            }
-        }
-        delete seen[i];
-    }
-    delete seen;
-    assert(covered);
-    assert(!unwanted);
-
-    // Check that we read out the expected elements when using forEachRow,
-    // and negate each element to check that write-back works.
-    int r = B.offset;
-    auto check_forEachRow = [&] (double* row) {
-        for (int col = 0; col < n; col++) {
-            #pragma omp critical
-            assert(row[col] == f(r, col, 0));
-            row[col] = -row[col];
-        }
-        #pragma omp critical
-        r++;
-    };
-    // Check that values are negative and make them positive again
-    auto check_negated = [&] (int i, int j, double val) {
-        assert(val == -f(i, j, 0));
-        return -val;
-    };
-    B.forEachRow(check_forEachRow);
-    B.map(check_negated);
-
-    MPI_Alltoall(B.data, send_counts, MPI_DOUBLE,
-                 B.temp_data, send_counts, MPI_DOUBLE, MPI_COMM_WORLD);
-
-    B.transpose();
-
-    // Check that we read out the expected transposed elements
-    r = B.offset;
-    auto check_transposed = [&] (double* row) {
-        for (int col = 0; col < n; col++) {
-            assert(row[col] == f(col, r, 0));
-        }
-        #pragma omp critical
-        r++;
-    };
-
-    B.forEachRow(check_transposed);
-
-    // Check that the elements are negated, this time using
-    // map
-    auto checkNeg = [&] (int i, int j, double val) {
-        assert(val == f(j, i, 0));
-        return val;
-    };
-    B.map(checkNeg);
-}
 
 int main(int argc, char** argv) {
     int rank, size;
@@ -256,7 +141,6 @@ int main(int argc, char** argv) {
 
     int n = atoi(argv[1]);
 
-    slicetest(n, rank, size);
     Poisson<test_f2> poisson(n, rank, size);
     poisson.run();
     double err = poisson.largestError<test_u2>();
@@ -270,7 +154,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        std::cout << "Largest error: " << largest << ", h*h = " << poisson.h * poisson.h << "\n";
+        std::cout << "Largest error: " << largest
+                  << ", h= " << std::pow(poisson.h, 2)
+                  << ", ratio=" << largest/std::pow(poisson.h, 2) << "\n";
     } else {
         MPI_Gather(&err, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }

@@ -40,7 +40,7 @@ public:
 
     template <typename Op>
     void map(Op op) {
-        #pragma omp parallel for schedule(static) collapse(2)
+        //        #pragma omp parallel for schedule(static) collapse(2)
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < cols; col++) {
                 // Translate into corresponding indices in the matrix
@@ -75,20 +75,23 @@ public:
 
   Represents a collection of sub-matrices that make up a
   collection of consecutive row in the matrix.
+
+  The slice allocates two buffers of size (n/p)^2 * p,
+  where one holds the elements of the matrix and the other
+  is used when transposing and calculating fst / inverse fst.
 */
 
 class Slice {
-    int n;
     int subs;
-    int sub_dim;
-    int last_sub_dim;
+    int row_size;
     SubMatrix** submatrices;
 
 public:
     double* data;
     double* temp_data;
-    int offset;
     int rows;
+    int offset;
+    int sub_size;
 
     ~Slice() {
         for (int i = 0; i < subs; i++) {
@@ -101,19 +104,20 @@ public:
     Slice(const Slice&) = delete;
 
     Slice(int n, int slices, int index)
-        : n(n), subs(slices)
+        : subs(slices)
     {
         const int storage_dim = std::ceil((double)n / slices);
-        const int storage_size = std::pow(storage_dim, 2);
-        submatrices = new SubMatrix*[slices];
-        data = new double[storage_size * slices];
-        temp_data = new double[storage_size * slices];
-
+        row_size = storage_dim * slices;
+        sub_size = std::pow(storage_dim, 2);
         offset = storage_dim * index;
-        sub_dim = storage_dim;
-        last_sub_dim = n - (slices - 1) * storage_dim;
+
+        submatrices = new SubMatrix*[slices];
+        data = new double[sub_size * slices];
+        temp_data = new double[sub_size * slices];
+
+        int last_sub_dim = n - (slices - 1) * storage_dim;
         if (index < slices - 1) {
-            rows = sub_dim;
+            rows = storage_dim;
         } else {
             rows = last_sub_dim;
         }
@@ -123,14 +127,13 @@ public:
             submatrices[i] = new SubMatrix(offset, i * storage_dim,
                                            rows, cols,
                                            storage_dim,
-                                           &data[i * storage_size],
-                                           &temp_data[i * storage_size]);
+                                           &data[i * sub_size],
+                                           &temp_data[i * sub_size]);
         }
     }
 
     template <typename Op>
     void map(Op op) {
-        #pragma omp parallel for
         for (int i = 0; i < subs; i++) {
             submatrices[i]->map(op);
         }
@@ -138,13 +141,13 @@ public:
 
     template <typename Op>
     void forEachRows(int start, int num, Op op) {
-        //#pragma omp parallel for
+        #pragma omp parallel for
         for (int i = 0; i < num; i++) {
-            double* buffer = &temp_data[i * 5 * n];
+            double* buffer = &temp_data[i * 5 * row_size];
             for (int j = 0; j < subs; j++) {
                 submatrices[j]->copyRowToBuffer(start + i, buffer);
             }
-            op(buffer);
+            op(offset + start + i, buffer);
             for (int j = 0; j < subs; j++) {
                 submatrices[j]->copyRowFromBuffer(start + i, buffer);
             }
@@ -155,16 +158,18 @@ public:
     void forEachRow(Op op) {
         const int chunk_size = rows / 5;
         const int chunks = (chunk_size == 0) ? 0 : 5;
-        const int leftover = rows % chunk_size;
+        const int leftover = (chunk_size == 0) ? rows : rows % chunk_size;
 
         for (int chunk = 0; chunk < chunks; chunk++) {
             forEachRows(chunk * chunk_size, chunk_size, op);
         }
-        forEachRows(chunks * chunk_size, leftover, op);
+        if (leftover > 0) {
+            forEachRows(chunks * chunk_size, leftover, op);
+        }
     }
 
     void transpose() {
-        #pragma omp parallel for
+        //        #pragma omp parallel for schedule(static)
         for (int i = 0; i < subs; i++) {
             submatrices[i]->transpose();
         }
