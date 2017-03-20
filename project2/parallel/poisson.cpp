@@ -17,12 +17,10 @@ template <double f(double, double)>
 struct Poisson {
     int n, m, rank, num_procs;
     double h;
-    double* z;
     double* diag;
     double* grid;
-    int* counts;
-    int* displacements;
-    Slice B, BT;
+    int send_counts;
+    Slice B;
 
     Poisson(int n, int rank, int num_procs)
         : n(n),
@@ -30,22 +28,11 @@ struct Poisson {
           rank(rank),
           num_procs(num_procs),
           h(1.0 / n),
-          B(m, num_procs, rank),
-          BT(m, num_procs, rank)
-
+          B(m, num_procs, rank)
     {
-        const int elements_per_proc = std::pow(n / num_procs, 2);
-        z = new double[4 * n];
+        send_counts = std::pow(n / num_procs, 2);
         diag = new double[m];
         grid = new double[n + 1];
-        counts = new int[num_procs];
-        displacements = new int[num_procs];
-
-        #pragma omp parallel for schedule(static)
-        for (int i = 0; i < num_procs; i++) {
-            counts[i] = elements_per_proc;
-            displacements[i] = i * elements_per_proc;
-        }
 
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < n + 1; i++) {
@@ -59,11 +46,8 @@ struct Poisson {
     }
 
     ~Poisson() {
-        delete[] z;
         delete[] diag;
         delete[] grid;
-        delete[] counts;
-        delete[] displacements;
     }
 
     void run() {
@@ -77,12 +61,12 @@ struct Poisson {
 
         auto fst = [this] (double* vec) {
             int nn = 4 * n;
-            fst_(vec, &n, z, &nn);
+            fst_(vec, &n, &vec[n], &nn);
         };
 
         auto fstinv = [this] (double* vec) {
             int nn = 4 * n;
-            fstinv_(vec, &n, z, &nn);
+            fstinv_(vec, &n, &vec[n], &nn);
         };
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -90,18 +74,16 @@ struct Poisson {
         B.map(apply_f);
         B.forEachRow(fst);
 
-        MPI_Alltoallv(B.data, counts, displacements, MPI_DOUBLE,
-                      B.temp_data, counts, displacements, MPI_DOUBLE,
-                      MPI_COMM_WORLD);
+        MPI_Alltoall(B.data, send_counts, MPI_DOUBLE,
+                     B.temp_data, send_counts, MPI_DOUBLE, MPI_COMM_WORLD);
 
         B.transpose();
         B.forEachRow(fstinv);
         B.map(solve_x);
         B.forEachRow(fst);
 
-        MPI_Alltoallv(B.data, counts, displacements, MPI_DOUBLE,
-                      B.temp_data, counts, displacements, MPI_DOUBLE,
-                      MPI_COMM_WORLD);
+        MPI_Alltoall(B.data, send_counts, MPI_DOUBLE,
+                     B.temp_data, send_counts, MPI_DOUBLE, MPI_COMM_WORLD);
 
         B.transpose();
         B.forEachRow(fstinv);
@@ -112,8 +94,8 @@ struct Poisson {
         double largest = 0;
         auto computeError = [this, &largest] (int i, int j, double val) {
             const double difference = std::abs(val - u(grid[i], grid[j]));
+            #pragma omp critical
             if (difference > largest) {
-                #pragma omp critical
                 largest = difference;
             }
             return val;
@@ -161,14 +143,7 @@ double test_u2(double x, double y) {
 void slicetest(int n, int rank, int size) {
     Slice B(n, size, rank);
 
-    int* counts = new int[size];
-    int* displacements = new int[size];
-    const int elements_per_proc = std::pow(std::ceil((double)n / size), 2);
-
-    for (int i = 0; i < size; i++) {
-        counts[i] = elements_per_proc;
-        displacements[i] = i * elements_per_proc;
-    }
+    int send_counts = std::pow(std::ceil((double)n / size), 2);
 
     // For debugging the tests
     auto printer = [&] (int i, int j, double val) {
@@ -192,6 +167,7 @@ void slicetest(int n, int rank, int size) {
         seen[i] = new bool[n] {};
     }
     auto check_coverage = [seen, &n] (int i, int j, double val) {
+        #pragma omp critical
         seen[i][j] += 1;
         return val;
     };
@@ -222,9 +198,11 @@ void slicetest(int n, int rank, int size) {
     int r = B.offset;
     auto check_forEachRow = [&] (double* row) {
         for (int col = 0; col < n; col++) {
+            #pragma omp critical
             assert(row[col] == f(r, col, 0));
             row[col] = -row[col];
         }
+        #pragma omp critical
         r++;
     };
     // Check that values are negative and make them positive again
@@ -235,9 +213,8 @@ void slicetest(int n, int rank, int size) {
     B.forEachRow(check_forEachRow);
     B.map(check_negated);
 
-    MPI_Alltoallv(B.data, counts, displacements, MPI_DOUBLE,
-                  B.temp_data, counts, displacements, MPI_DOUBLE,
-                  MPI_COMM_WORLD);
+    MPI_Alltoall(B.data, send_counts, MPI_DOUBLE,
+                 B.temp_data, send_counts, MPI_DOUBLE, MPI_COMM_WORLD);
 
     B.transpose();
 
@@ -247,6 +224,7 @@ void slicetest(int n, int rank, int size) {
         for (int col = 0; col < n; col++) {
             assert(row[col] == f(col, r, 0));
         }
+        #pragma omp critical
         r++;
     };
 

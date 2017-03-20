@@ -1,44 +1,40 @@
 #include <iostream>
+#include <vector>
 #include "slice.h"
 #include <assert.h>
 
-constexpr int n = 7;
+int main(int argc, char **argv) {
+    int n = atoi(argv[1]);
+    int numslices = atoi(argv[2]);
 
-double f(int y, int x, double) {
-    return n * y + x;
-}
+    std::vector<Slice*> Bslices;
+    std::vector<Slice*> BTslices;
+    for (int i = 0; i < numslices; i++) {
+        Bslices.push_back(new Slice(n, numslices, i));
+        BTslices.push_back(new Slice(n, numslices, i));
+    }
 
-int main() {
-    Slice slices[] = {{n, 4, 0}, {n, 4, 1}, {n, 4, 2}, {n, 4, 3}};
+    auto f = [&n] (int y, int x, double) {
+        return n * y + x;
+    };
 
     int r = 0;
-    for (Slice& slice : slices) {
-        const int bin_dim = n / 4;
-        const int bins = 4;
-        const int bin_size = std::pow(bin_dim, 2);
-
-        slice.map(f);
+    for (Slice* slice : Bslices) {
+        slice->map(f);
 
         auto check = [&] (double* row) {
             for (int col = 0; col < n; col++) {
-                if (row[col] != f(r, col, 0)) {
-                    std::cout << "Failed: r=" << r
-                              << ", col=" << col
-                              << ", val=" << row[col]
-                    << ", expected=" << f(r, col, 0)
-                    << "\n";
-                }
+                assert(row[col] == f(r, col, 0));
             }
             r++;
         };
 
-        slice.forEachRow(check);
+        slice->forEachRow(check);
     }
 
-    Slice A(n, 4, 0);
-
-    A.map(f);
-
+    for (Slice* slice : BTslices) {
+        
+    }
     auto printer = [&] (int i, int j, double val) {
         std::cout << "i=" << i
         << ", j=" << j
@@ -59,5 +55,5 @@ int main() {
         return val;
     };
 
-    A.map(check);
+    //    A.map(check);
 }

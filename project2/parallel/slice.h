@@ -78,7 +78,7 @@ public:
 */
 
 class Slice {
-    //    int m_n;
+    int n;
     int subs;
     int sub_dim;
     int last_sub_dim;
@@ -101,7 +101,7 @@ public:
     Slice(const Slice&) = delete;
 
     Slice(int n, int slices, int index)
-        : subs(slices)
+        : n(n), subs(slices)
     {
         const int storage_dim = std::ceil((double)n / slices);
         const int storage_size = std::pow(storage_dim, 2);
@@ -137,22 +137,30 @@ public:
     }
 
     template <typename Op>
-    void forEachRow(Op op) {
-        static double* buffer = new double[subs * sub_dim];
-
-        for (int row = 0; row < rows; row++) {
-            #pragma omp parallel for
-            for (int i = 0; i < subs; i++) {
-                submatrices[i]->copyRowToBuffer(row, buffer);
+    void forEachRows(int start, int num, Op op) {
+        //#pragma omp parallel for
+        for (int i = 0; i < num; i++) {
+            double* buffer = &temp_data[i * 5 * n];
+            for (int j = 0; j < subs; j++) {
+                submatrices[j]->copyRowToBuffer(start + i, buffer);
             }
-
             op(buffer);
-
-            #pragma omp parallel for
-            for (int i = 0; i < subs; i++) {
-                submatrices[i]->copyRowFromBuffer(row, buffer);
+            for (int j = 0; j < subs; j++) {
+                submatrices[j]->copyRowFromBuffer(start + i, buffer);
             }
         }
+    }
+
+    template <typename Op>
+    void forEachRow(Op op) {
+        const int chunk_size = rows / 5;
+        const int chunks = (chunk_size == 0) ? 0 : 5;
+        const int leftover = rows % chunk_size;
+
+        for (int chunk = 0; chunk < chunks; chunk++) {
+            forEachRows(chunk * chunk_size, chunk_size, op);
+        }
+        forEachRows(chunks * chunk_size, leftover, op);
     }
 
     void transpose() {
