@@ -63,7 +63,7 @@ int main(int argc, char **argv)
     real *z = mk_1D_array(nn, false);
     for (size_t i = 0; i < m; i++) {
         for (size_t j = 0; j < m; j++) {
-            b[i][j] = h * h * rhs(grid[i], grid[j]);
+            b[i][j] = h * h * rhs(grid[i + 1], grid[j + 1]);
         }
     }
 
@@ -96,14 +96,14 @@ int main(int argc, char **argv)
     double u_max = 0.0;
     for (size_t i = 0; i < m; i++) {
         for (size_t j = 0; j < m; j++) {
-            double difference = fabs(b[i][j] - sol(grid[i], grid[j]));
+            double difference = fabs(b[i][j] - sol(grid[i + 1], grid[j + 1]));
             if (difference > u_max) {
                 u_max = difference;
             }
         }
     }
 
-    printf("u_max = %e\n", u_max/h);
+    printf("u_max = %e\n", u_max);
 
     return 0;
 }

@@ -49,7 +49,7 @@ struct Poisson {
 
     void run() {
         auto apply_f = [this] (int i, int j, double) {
-            return h * h * f(grid[i], grid[j]);
+            return h * h * f(grid[i + 1], grid[j + 1]);
         };
 
         auto solve_x = [this] (int i, int j, double val) {
@@ -90,7 +90,7 @@ struct Poisson {
     double largestError() {
         double largest = 0;
         auto computeError = [this, &largest] (int i, int j, double val) {
-            const double difference = std::abs(val - u(grid[i], grid[j]));
+            const double difference = std::abs(val - u(grid[i + 1], grid[j + 1]));
             #pragma omp critical
             {
             if (difference > largest)
