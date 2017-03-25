@@ -1,10 +1,9 @@
 #include <mpi.h>
-#include <algorithm>
 #include <math.h>
 #include <assert.h>
 #include <iostream>
 #include "slice.h"
-#include <memory.h>
+#include <limits>
 
 using real = double;
 
@@ -123,45 +122,61 @@ double test_u2(double x, double y) {
     return (x - x*x) * (y - y*y);
 }
 
+bool power_of_two(int n) {
+    return (n & (n >> 1)) == 0;
+}
 
-int main(int argc, char** argv) {
+int run(int argc, char** argv) {
     int rank, size;
-
-    MPI_Init(&argc, &argv);
 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    bool is_power_of_two = false;
-    for (int i = 0; i < 32; i++) {
-        if (pow(2, i) == size)
-            is_power_of_two = true;
+    if (argc < 2) {
+        if (rank == 0)
+            std::cout << "Usage:\n"
+                      << "  poisson n (power of two)\n\n";
+        return 1;
     }
-    assert(is_power_of_two);
 
     int n = atoi(argv[1]);
+
+    if (!power_of_two(size)) {
+        if (rank == 0)
+            std::cout << "Number of processes has to be a power of 2\n\n";
+        return 1;
+    }
+
+    if (!power_of_two(n)) {
+        if (rank == 0)
+            std::cout << "n has to be a power of 2\n\n";
+        return 1;
+    }
 
     Poisson<test_f> poisson(n, rank, size);
     poisson.run();
     double err = poisson.largestError<test_u>();
-    if (rank == 0) {
-        double* errs = new double[size];
-        MPI_Gather(&err, 1, MPI_DOUBLE, errs, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        double largest = 0;
-        for (int i = 0; i < size; i++) {
-            if (errs[i] > largest) {
-                largest = errs[i];
-            }
-        }
-
-        std::cout << "Largest error: " << largest
-                  << ", h= " << std::pow(poisson.h, 2)
-                  << ", ratio=" << largest/std::pow(poisson.h, 2) << "\n";
-    } else {
-        MPI_Gather(&err, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    }
+    double max_err;
     std::cout << err << "\n";
+    MPI_Reduce(&err, &max_err, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    if (rank == 0) {
+        std::cout.precision(std::numeric_limits<double>::max_digits10);
+        std::cout << "n        : " << n << "\n"
+                  << "max error: " << max_err << "\n"
+                  << "h        : " << std::pow(poisson.h, 2) << "\n"
+                  << "ratio    : " << max_err/std::pow(poisson.h, 2) << "\n\n";
+    }
+
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+
+    int err = run(argc, argv);
 
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
+
+    return err;
 }
