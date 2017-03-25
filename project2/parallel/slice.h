@@ -125,11 +125,16 @@ public:
         }
     }
 
+    template <typename... Args>
+    void eachSubMatrix(void (SubMatrix::*fn)(Args...), Args... args) {
+        for (int i = 0; i < subs; i++) {
+            (submatrices[i].get()->*fn)(args...);
+        }
+    }
+
     template <typename Op>
     void map(Op op) {
-        for (int i = 0; i < subs; i++) {
-            submatrices[i]->map(op);
-        }
+        eachSubMatrix(&SubMatrix::map, op);
     }
 
     template <typename Op>
@@ -137,13 +142,9 @@ public:
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < num; i++) {
             double* const buffer = &temp_data[i * 5 * row_size];
-            for (int j = 0; j < subs; j++) {
-                submatrices[j]->copyRowToBuffer(start + i, buffer);
-            }
+            eachSubMatrix(&SubMatrix::copyRowToBuffer, start + i, buffer);
             op(offset + start + i, buffer);
-            for (int j = 0; j < subs; j++) {
-                submatrices[j]->copyRowFromBuffer(start + i, buffer);
-            }
+            eachSubMatrix(&SubMatrix::copyRowFromBuffer, start + i, buffer);
         }
     }
 
@@ -162,9 +163,7 @@ public:
     }
 
     void transpose() {
-        for (int i = 0; i < subs; i++) {
-            submatrices[i]->transpose();
-        }
+        eachSubMatrix(&SubMatrix::transpose);
     }
 
     double* getSendBuffer() {
