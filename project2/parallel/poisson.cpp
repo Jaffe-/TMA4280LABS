@@ -141,9 +141,9 @@ int main(int argc, char** argv) {
 
     int n = atoi(argv[1]);
 
-    Poisson<test_f2> poisson(n, rank, size);
+    Poisson<test_f> poisson(n, rank, size);
     poisson.run();
-    double err = poisson.largestError<test_u2>();
+    double err = poisson.largestError<test_u>();
     if (rank == 0) {
         double* errs = new double[size];
         MPI_Gather(&err, 1, MPI_DOUBLE, errs, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);

@@ -103,17 +103,25 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("u_max = %e\n", u_max);
+    printf("u_max = %e\n", u_max/h);
 
     return 0;
 }
 
+/* real sol(real x, real y) { */
+/*     return (x - x*x) * (y - y*y); */
+/* } */
+
+/* real rhs(real x, real y) { */
+/*     return 2 * (y - y*y + x - x*x); */
+/* } */
+
 real sol(real x, real y) {
-    return (x - x*x) * (y - y*y);
+    return sin(PI * x) * sin(2 * PI * y);
 }
 
 real rhs(real x, real y) {
-    return 2 * (y - y*y + x - x*x);
+    return 5 * pow(PI, 2) * sol(x, y);
 }
 
 void transpose(real **bt, real **b, size_t m)
