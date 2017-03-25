@@ -40,7 +40,7 @@ public:
 
     template <typename Op>
     void map(Op op) {
-        //        #pragma omp parallel for schedule(static) collapse(2)
+        #pragma omp parallel for schedule(static) collapse(2)
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < cols; col++) {
                 // Translate into corresponding indices in the matrix
@@ -84,22 +84,14 @@ public:
 class Slice {
     int subs;
     int row_size;
-    SubMatrix** submatrices;
+    std::unique_ptr<std::unique_ptr<SubMatrix>[]> submatrices;
 
 public:
-    double* data;
-    double* temp_data;
+    std::unique_ptr<double[]> data;
+    std::unique_ptr<double[]> temp_data;
     int rows;
     int offset;
     int sub_size;
-
-    ~Slice() {
-        for (int i = 0; i < subs; i++) {
-            delete submatrices[i];
-        }
-        delete data;
-        delete temp_data;
-    }
 
     Slice(const Slice&) = delete;
 
@@ -111,9 +103,9 @@ public:
         sub_size = std::pow(storage_dim, 2);
         offset = storage_dim * index;
 
-        submatrices = new SubMatrix*[slices];
-        data = new double[sub_size * slices];
-        temp_data = new double[sub_size * slices];
+        submatrices = std::make_unique<std::unique_ptr<SubMatrix>[]>(slices);
+        data = std::make_unique<double[]>(sub_size * slices);
+        temp_data = std::make_unique<double[]>(sub_size * slices);
 
         int last_sub_dim = n - (slices - 1) * storage_dim;
         if (index < slices - 1) {
@@ -124,11 +116,12 @@ public:
 
         for (int i = 0; i < slices; i++) {
             int cols = (i == slices - 1) ? last_sub_dim : storage_dim;
-            submatrices[i] = new SubMatrix(offset, i * storage_dim,
-                                           rows, cols,
-                                           storage_dim,
-                                           &data[i * sub_size],
-                                           &temp_data[i * sub_size]);
+            submatrices[i] =
+                std::make_unique<SubMatrix>(offset, i * storage_dim,
+                                            rows, cols,
+                                            storage_dim,
+                                            &data.get()[i * sub_size],
+                                            &temp_data.get()[i * sub_size]);
         }
     }
 
@@ -141,9 +134,9 @@ public:
 
     template <typename Op>
     void forEachRows(int start, int num, Op op) {
-        #pragma omp parallel for
+        #pragma omp parallel for schedule(static)
         for (int i = 0; i < num; i++) {
-            double* buffer = &temp_data[i * 5 * row_size];
+            double* const buffer = &temp_data[i * 5 * row_size];
             for (int j = 0; j < subs; j++) {
                 submatrices[j]->copyRowToBuffer(start + i, buffer);
             }
@@ -169,10 +162,17 @@ public:
     }
 
     void transpose() {
-        //        #pragma omp parallel for schedule(static)
         for (int i = 0; i < subs; i++) {
             submatrices[i]->transpose();
         }
+    }
+
+    double* getSendBuffer() {
+        return data.get();
+    }
+
+    double* getRecvBuffer() {
+        return temp_data.get();
     }
 
 };

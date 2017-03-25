@@ -72,8 +72,8 @@ void slicetest(int n, int rank, int size) {
     B.forEachRow(check_forEachRow);
     B.map(check_negated);
 
-    MPI_Alltoall(B.data, B.sub_size, MPI_DOUBLE,
-                 B.temp_data, B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Alltoall(B.getSendBuffer(), B.sub_size, MPI_DOUBLE,
+                 B.getRecvBuffer(), B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
 
     B.transpose();
 
