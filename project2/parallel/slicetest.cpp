@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <mpi.h>
 #include "slice.h"
+#include <vector>
 
 void slicetest(int n, int rank, int size) {
     Slice B(n, size, rank);
@@ -20,21 +21,26 @@ void slicetest(int n, int rank, int size) {
         assert(i >= 0 && i < n && j >= 0 && j < n);
         return n * i + j;
     };
-
-    // Fill test values
     B.map(f);
-    //    B.map(printer);
 
-    bool** seen = new bool*[n];
-    for (int i = 0; i < n; i++) {
-        seen[i] = new bool[n] {};
+
+    // Check that when iterating using map, the function is called on
+    // every expected coordinate (i, j). Also check that it is not called
+    // on (i, j) outside of the slice.
+    std::vector<std::vector<int>> seen(n);
+    for (auto& row : seen) {
+        row.reserve(n);
     }
-    auto check_coverage = [seen, &n] (int i, int j, double val) {
+
+    auto check_coverage = [&seen, &n] (int i, int j, double val) {
         #pragma omp critical
-        seen[i][j] += 1;
+        {
+            seen[i][j]++;
+        }
         return val;
     };
     B.map(check_coverage);
+
     bool covered = true;
     bool unwanted = false;
     for (int i = 0; i < n; i++) {
@@ -50,11 +56,10 @@ void slicetest(int n, int rank, int size) {
                     unwanted = true;
             }
         }
-        delete seen[i];
     }
-    delete seen;
     assert(covered);
     assert(!unwanted);
+
 
     // Check that we read out the expected elements when using forEachRow,
     // and negate each element to check that write-back works.
@@ -64,7 +69,6 @@ void slicetest(int n, int rank, int size) {
             data[col] = -data[col];
         }
     };
-    // Check that values are negative and make them positive again
     auto check_negated = [&] (int i, int j, double val) {
         assert(val == -f(i, j, 0));
         return -val;
@@ -72,28 +76,30 @@ void slicetest(int n, int rank, int size) {
     B.forEachRow(check_forEachRow);
     B.map(check_negated);
 
+
+    // Check that we read out the expected transposed elements
     MPI_Alltoall(B.getSendBuffer(), B.sub_size, MPI_DOUBLE,
                  B.getRecvBuffer(), B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
 
     B.transpose();
 
-    // Check that we read out the expected transposed elements
     auto check_transposed = [&] (int row, double* data) {
         for (int col = 0; col < n; col++) {
             assert(data[col] == f(col, row, 0));
         }
     };
-
     B.forEachRow(check_transposed);
 
-    // Check that the elements are negated, this time using
-    // map
+
+    // Check that the elements are negated, this time using map
     auto checkNeg = [&] (int i, int j, double val) {
         assert(val == f(j, i, 0));
         return val;
     };
     B.map(checkNeg);
 
+
+    // Check that the largest value in the slice is the expected one
     double largest = 0;
     auto computeLargest = [&largest] (int i, int j, double val) {
         #pragma omp critical
