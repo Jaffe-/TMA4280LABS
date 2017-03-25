@@ -16,8 +16,8 @@ template <double f(double, double)>
 struct Poisson {
     int n, m, rank, num_procs;
     double h;
-    double* diag;
-    double* grid;
+    std::unique_ptr<double[]> diag;
+    std::unique_ptr<double[]> grid;
     Slice B;
 
     Poisson(int n, int rank, int num_procs)
@@ -28,8 +28,8 @@ struct Poisson {
           h(1.0 / n),
           B(m, num_procs, rank)
     {
-        diag = new double[m];
-        grid = new double[n + 1];
+        diag = std::make_unique<double[]>(m);
+        grid = std::make_unique<double[]>(n + 1);
 
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < n + 1; i++) {
@@ -40,11 +40,6 @@ struct Poisson {
         for (int i = 0; i < m; i++) {
             diag[i] = 2.0 * (1.0 - cos((i + 1) * M_PI / n));
         }
-    }
-
-    ~Poisson() {
-        delete[] diag;
-        delete[] grid;
     }
 
     void run() {
