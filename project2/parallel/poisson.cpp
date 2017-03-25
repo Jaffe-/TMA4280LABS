@@ -154,17 +154,25 @@ int run(int argc, char** argv) {
     }
 
     Poisson<test_f> poisson(n, rank, size);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double t_start = MPI_Wtime();
+
     poisson.run();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double t_end = MPI_Wtime();
+
     double err = poisson.largestError<test_u>();
     double max_err;
-    std::cout << err << "\n";
     MPI_Reduce(&err, &max_err, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
     if (rank == 0) {
         std::cout.precision(std::numeric_limits<double>::max_digits10);
-        std::cout << "n        : " << n << "\n"
-                  << "max error: " << max_err << "\n"
-                  << "h        : " << std::pow(poisson.h, 2) << "\n"
-                  << "ratio    : " << max_err/std::pow(poisson.h, 2) << "\n\n";
+        std::cout << "n      : " << n << "\n"
+                  << "error  : " << max_err << "\n"
+                  << "time   : " << t_end - t_start << "\n"
+                  << "err/h^2: " << max_err/std::pow(poisson.h, 2) << "\n\n";
     }
 
     return 0;
