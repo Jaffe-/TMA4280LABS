@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include <memory>
+#include <algorithm>
 #include "submatrix.h"
 
 /*
@@ -38,7 +39,7 @@ public:
 
         submatrices = std::make_unique<std::unique_ptr<SubMatrix>[]>(slices);
         data = std::make_unique<double[]>(sub_size * slices);
-        temp_data = std::make_unique<double[]>(sub_size * slices);
+        temp_data = std::make_unique<double[]>(std::max(sub_size * slices, 5 * row_size));
 
         int last_sub_dim = n - (slices - 1) * storage_dim;
         if (index < slices - 1) {
@@ -83,15 +84,15 @@ public:
 
     template <typename Op>
     void forEachRow(Op op) {
-        const int chunk_size = rows / 5;
-        const int chunks = (chunk_size == 0) ? 0 : 5;
-        const int leftover = (chunk_size == 0) ? rows : rows % chunk_size;
+        const int chunk_size = std::max(rows / 5, 1);
+        const int chunks = rows / chunk_size;
+        const int last_chunk_size = rows - chunks * chunk_size;
 
         for (int chunk = 0; chunk < chunks; chunk++) {
             forEachRows(chunk * chunk_size, chunk_size, op);
         }
-        if (leftover > 0) {
-            forEachRows(chunks * chunk_size, leftover, op);
+        if (last_chunk_size > 0) {
+            forEachRows(chunks * chunk_size, last_chunk_size, op);
         }
     }
 
