@@ -1,8 +1,19 @@
 #include <iostream>
-#include <assert.h>
+#include <vector>
 #include <mpi.h>
 #include "slice.h"
-#include <vector>
+
+#define CHECK(expr) \
+    if (!(expr)) {   \
+        std::cout << "Process " << rank << " failed: " << #expr << "\n"; \
+        exit(1); \
+    }
+
+#define CHECK_MSG(expr, msg)                        \
+    if (!(expr)) {   \
+        std::cout << "Process " << rank << " failed: " << #expr << " (" << msg << ")\n"; \
+        exit(1); \
+    }
 
 void slicetest(int n, int rank, int size) {
     Slice B(n, size, rank);
@@ -17,8 +28,8 @@ void slicetest(int n, int rank, int size) {
 
 
     // Produce test values and check that i, j are inside bounds
-    auto f = [&n] (int i, int j, double) {
-        assert(i >= 0 && i < n && j >= 0 && j < n);
+    auto f = [rank, &n] (int i, int j, double) {
+        CHECK(i >= 0 && i < n && j >= 0 && j < n);
         return n * i + j;
     };
     B.map(f);
@@ -27,16 +38,11 @@ void slicetest(int n, int rank, int size) {
     // Check that when iterating using map, the function is called on
     // every expected coordinate (i, j). Also check that it is not called
     // on (i, j) outside of the slice.
-    std::vector<std::vector<int>> seen(n);
-    for (auto& row : seen) {
-        row.reserve(n);
-    }
+
+    std::vector<std::vector<int>> seen(n, std::vector<int>(n));
 
     auto check_coverage = [&seen, &n] (int i, int j, double val) {
-        #pragma omp critical
-        {
-            seen[i][j]++;
-        }
+        seen[i][j]++;
         return val;
     };
     B.map(check_coverage);
@@ -52,25 +58,26 @@ void slicetest(int n, int rank, int size) {
                 }
             }
             else {
-                if (seen[i][j] != 0)
+                if (seen[i][j] != 0) {
                     unwanted = true;
+                }
             }
         }
     }
-    assert(covered);
-    assert(!unwanted);
+    CHECK(covered);
+    CHECK(!unwanted);
 
 
     // Check that we read out the expected elements when using forEachRow,
     // and negate each element to check that write-back works.
     auto check_forEachRow = [=] (int row, double* data) mutable {
         for (int col = 0; col < n; col++) {
-            assert(data[col] == f(row, col, 0));
+            CHECK(data[col] == f(row, col, 0));
             data[col] = -data[col];
         }
     };
     auto check_negated = [&] (int i, int j, double val) {
-        assert(val == -f(i, j, 0));
+        CHECK_MSG(val == -f(i, j, 0), "i=" << i << ", j=" << j << ", val=" << val << ", f=" << -f(i, j, 0));
         return -val;
     };
     B.forEachRow(check_forEachRow);
@@ -85,7 +92,7 @@ void slicetest(int n, int rank, int size) {
 
     auto check_transposed = [&] (int row, double* data) {
         for (int col = 0; col < n; col++) {
-            assert(data[col] == f(col, row, 0));
+            CHECK(data[col] == f(col, row, 0));
         }
     };
     B.forEachRow(check_transposed);
@@ -93,7 +100,7 @@ void slicetest(int n, int rank, int size) {
 
     // Check that the elements are negated, this time using map
     auto checkNeg = [&] (int i, int j, double val) {
-        assert(val == f(j, i, 0));
+        CHECK(val == f(j, i, 0));
         return val;
     };
     B.map(checkNeg);
@@ -110,7 +117,8 @@ void slicetest(int n, int rank, int size) {
         return val;
     };
     B.map(computeLargest);
-    assert(largest == f(n - 1, B.offset + B.rows - 1, 0));
+    CHECK(largest == f(n - 1, B.offset + B.rows - 1, 0));
+
 }
 
 int main(int argc, char **argv) {
@@ -124,6 +132,7 @@ int main(int argc, char **argv) {
 
     slicetest(n, rank, size);
 
+    std::cout << "OK\n";
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
 }
