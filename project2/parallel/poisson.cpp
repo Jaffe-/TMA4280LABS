@@ -18,7 +18,7 @@ struct Poisson {
     double h;
     std::unique_ptr<double[]> diag;
     std::unique_ptr<double[]> grid;
-    Slice B;
+    Slice S;
 
     Poisson(int n, int rank, int num_procs)
         : n(n),
@@ -26,16 +26,18 @@ struct Poisson {
           rank(rank),
           num_procs(num_procs),
           h(1.0 / n),
-          B(m, num_procs, rank)
+          S(m, num_procs, rank)
     {
         diag = std::make_unique<double[]>(m);
         grid = std::make_unique<double[]>(n + 1);
 
+        // Compute the grid points
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < n + 1; i++) {
             grid[i] = i * h;
         }
 
+        // Compute the diagonal of the eigenvalue matrix
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < m; i++) {
             diag[i] = 2.0 * (1.0 - cos((i + 1) * M_PI / n));
@@ -43,42 +45,48 @@ struct Poisson {
     }
 
     void run() {
+        // Apply h^2 * f(x_i, y_j)
         auto apply_f = [this] (int i, int j, double) {
             return h * h * f(grid[i + 1], grid[j + 1]);
         };
 
+        // Solve the diagonal system
         auto solve_x = [this] (int i, int j, double val) {
             return val / (diag[i] + diag[j]);
         };
 
+        // Compute FST on the given vector,
+        // &vec[n] is assumed to point to a buffer of size 4 * n,
+        // which is used to store coefficients
         auto fst = [=] (int r, double* vec) {
             int nn = 4 * n;
             fst_(vec, &n, &vec[n], &nn);
         };
 
+        // Compute FST on the given vector,
+        // &vec[n] is assumed to point to a buffer of size 4 * n,
+        // which is used to store coefficients
         auto fstinv = [=] (int r, double* vec) {
             int nn = 4 * n;
             fstinv_(vec, &n, &vec[n], &nn);
         };
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        S.map(apply_f);
+        S.forEachRow(fst);
 
-        B.map(apply_f);
-        B.forEachRow(fst);
+        MPI_Alltoall(S.getSendBuffer(), S.sub_size, MPI_DOUBLE,
+                     S.getRecvBuffer(), S.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
 
-        MPI_Alltoall(B.getSendBuffer(), B.sub_size, MPI_DOUBLE,
-                     B.getRecvBuffer(), B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
+        S.transpose();
+        S.forEachRow(fstinv);
+        S.map(solve_x);
+        S.forEachRow(fst);
 
-        B.transpose();
-        B.forEachRow(fstinv);
-        B.map(solve_x);
-        B.forEachRow(fst);
+        MPI_Alltoall(S.getSendBuffer(), S.sub_size, MPI_DOUBLE,
+                     S.getRecvBuffer(), S.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
 
-        MPI_Alltoall(B.getSendBuffer(), B.sub_size, MPI_DOUBLE,
-                     B.getRecvBuffer(), B.sub_size, MPI_DOUBLE, MPI_COMM_WORLD);
-
-        B.transpose();
-        B.forEachRow(fstinv);
+        S.transpose();
+        S.forEachRow(fstinv);
     }
 
     template <double u(double, double)>
@@ -93,7 +101,7 @@ struct Poisson {
             }
             return val;
         };
-        B.map(computeError);
+        S.map(computeError);
 
         return largest;
     }

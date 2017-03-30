@@ -11,8 +11,8 @@
   collection of consecutive row in the matrix.
 
   The slice allocates two buffers of size (n/p)^2 * p,
-  where one holds the elements of the matrix and the other
-  is used when transposing and calculating fst / inverse fst.
+  the primary which holds the elements of the matrix and the secondary
+  which is used when transposing and calculating fst / inverse fst.
 */
 
 class Slice {
@@ -21,8 +21,8 @@ class Slice {
     std::unique_ptr<std::unique_ptr<SubMatrix>[]> submatrices;
 
 public:
-    std::unique_ptr<double[]> data;
-    std::unique_ptr<double[]> temp_data;
+    std::unique_ptr<double[]> data;          // Primary
+    std::unique_ptr<double[]> temp_data;     // Secondary
     int rows;
     int offset;
     int sub_size;
